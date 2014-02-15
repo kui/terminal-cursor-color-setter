@@ -1,0 +1,79 @@
+#!/bin/bash -e
+#
+# terminal application cursor color setter daemon
+#
+
+# cursor color
+CURSOR_COLOR='\e]12;#009900\a' # grean
+# CURSOR_COLOR='\e]12;#990000\a' # red
+# CURSOR_COLOR='\e]12;#000099\a' # blue
+
+# terminal commands which can take ANSI escape codes
+COMMANDS=(
+    gnome-terminal
+)
+
+# color setting interval [sec]
+INTERVAL=3
+
+##
+
+if [[ -n "${DEBUG-}" ]]; then
+    set -x
+fi
+
+main() {
+    [[ "$OSTYPE" != 'linux-gnu' ]] \
+        && abort "run on GNU Linux: OSTYPE = '$OSTYPE'"
+    [[ -z ${DISPLAY-} ]] \
+        && abort "run on X: not found \$DISPLAY"
+
+    local ttys
+    while true; do
+        ttys=($(get_tty))
+
+        if [[ ${#ttys} -gt 0 ]]; then
+            for tty in ${ttys[@]}; do
+                echo -ne "$CURSOR_COLOR" >> "$tty"
+            done
+        fi
+
+        sleep $INTERVAL
+    done
+}
+
+PTS_PATTERN='^/dev/pts/[0-9]+$'
+get_tty() {
+    local pids=($(pgrep "${COMMANDS[@]}"))
+    local ttys=()
+    local pid fd d pts
+    for pid in ${pids[@]}; do
+        for fd in /proc/${pid}/fd/*; do
+            d="${fd##/proc/*/fd/}"
+            [[ "$d" =~ [0-9]+ && $d -gt 2 ]] || continue
+
+            pts="$(readlink -f "$fd")"
+            [[ "$pts" =~ $PTS_PATTERN ]] || continue
+
+            ttys=("${ttys[@]}" "$pts")
+        done
+    done
+    echo "${ttys[@]}"
+}
+
+abort() {
+    echo "$*" >&2
+    exit $(exit_code "$*")
+}
+exit_code() {
+    local c=$(hash_code 255 "$1")
+    echo $((c + 1))
+}
+hash_code() {
+    local base=$1
+    shift
+    local s=$(sum <<< "$*" | cut -d' ' -f1)
+    bc <<< "$s % $base"
+}
+
+main
